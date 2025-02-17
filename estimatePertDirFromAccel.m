@@ -8,12 +8,12 @@ addOptional(p,'dataTable',[]);
 parse(p,varargin{:});
 
 if ~isempty(p.Results.srcFile)
-	srcFile = p.Results.srcFile;
-	load(srcFile);
+    srcFile = p.Results.srcFile;
+    load(srcFile);
 end
 
 if ~isempty(p.Results.dataTable)
-	dataTable = p.Results.dataTable;
+    dataTable = p.Results.dataTable;
 end
 
 atime = dataTable.atime(1,:);
@@ -37,7 +37,7 @@ plot(Accels_R')
 [~,NDX] = max(Accels_R,[],2);
 Accels_Dir = nan(size(NDX));
 for i = 1:size(Accels_Deg,1)
-	Accels_Dir(i) = Accels_Deg(i,NDX(i));
+    Accels_Dir(i) = Accels_Deg(i,NDX(i));
 end
 Accels_Dir = findnearestpertdir(Accels_Dir);
 

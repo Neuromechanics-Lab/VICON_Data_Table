@@ -3,7 +3,7 @@ function saveFileName = interpolateRecordedData(src, srcFolder, varargin)
 p = inputParser;
 addOptional(p,'srcDir',src);
 addOptional(p,'staticTrialFormat','Stat*\d\d');
-addOptional(p,'trialNameFormat','Trial'); % trial name format - change as needed
+addOptional(p,'trialNameFormat',''); % trial name format - change as needed
 addOptional(p,'trialNumbers',[]);
 addOptional(p,'participantCodeFormat','RVS\d\d\d'); % Study Code
 addOptional(p,'stepForceThresholdN',10);
@@ -29,8 +29,12 @@ interpFrameRate = p.Results.interpFrameRate;
 % generate file names from source directory
 filenames = generatefilenames(srcDir);
 
-% delete files that do not match the trial string specification
-filenames(cellfun(@isempty,regexp(filenames.trialname,p.Results.trialNameFormat)),:) = [];
+% delete files that do not match the trial name format specification
+if ~isempty(p.Results.trialNameFormat)
+    filenames(cellfun(@isempty,regexp(filenames.trialname,p.Results.trialNameFormat)),:) = [];
+else
+    filenames(~cellfun(@isempty,regexpi(filenames.trialname,'Stat*')),:) = []; % delete stat trials if no specified name format
+end
 
 if ~isempty(p.Results.trialNumbers)
     % erase non-numeric characters
@@ -38,23 +42,18 @@ if ~isempty(p.Results.trialNumbers)
     filenames(~ismember(trialNumbers,p.Results.trialNumbers),:) = [];
 end
 
-% loop through, load, and interpolate the data
+% specify variable names from single trial mat files to store in data table
 varNames = getVarNames;
-
-% add additional markers if necessary
-if ~isempty(p.Results.additionalMarkers)
-    additionalMarkerNames = expandNames3D(p.Results.additionalMarkers);
-    dataTable = names2table([varNames cellstr(additionalMarkerNames)]);
-else
-    dataTable = names2table(varNames);
-end
+%create data table
+dataTable = names2table(varNames);
 
 % create an interpolated database
 temp = filenames.filename';
-% datasheet = load([srcDir '\DataSheet.mat']); % load perturbation file\
+datasheet = uigetfile(srcFolder,'Select Perturbation Log file (If no log file, press Cancel)');
+% datasheet = load([srcDir '\DataSheet.mat']); % load perturbation file
 datasheet = [];
 % Load single trial data
-for f = temp %f = temp(1) % for troubleshooting single trial data
+for f = temp 
     try
         loadTrialSub(f,datasheet);
     catch
@@ -69,8 +68,9 @@ dataTable = [filenames dataTable];
 % dataTable = [filenames(1,:) dataTable]; %for single trial troubleshooting
 
 % save the interpolated data
-subj_ID = string(extractBetween(srcDir,string(srcFolder) + "\","\New Session"));
-saveFileName = srcFolder + "\" + subj_ID + "_Gait.mat";
+subj_ID = string(extractAfter(srcDir,srcFolder + "\"));
+saveFileName = srcFolder + "\" + subj_ID + ".mat";
+% [~,~,~] = uiputfile(saveFileName);
 save(saveFileName,'dataTable');
 
     function loadTrialSub(f,datasheet)
@@ -84,25 +84,12 @@ save(saveFileName,'dataTable');
             platonset = 0;
         else
             platonset = recalculatePlatOnset(d.Accels,d.atime);
-        end
-        %         if contains(f,'PDAon01')
-        %             x = 0:7.65/500:7.65;
-        %             r = 0;
-        %             for i = 1:999
-        %                 temp2 = corrcoef(x,abs(d.LVDT(platonset*1000-500+i:platonset*1000+i,2)));
-        %                 if temp2(1,2)>r
-        %                     r = temp2(1,2);
-        %                     delay = i;
-        %                 end
-        %             end
-        %             platonset = d.atime(platonset*1000+delay-500-40);
-        %         end
-        
-        % if this didn't work, calculate from LVDT
-        if isnan(platonset)
-            LVDTmag = (d.LVDT(:,1).^2+d.LVDT(:,2).^2).^0.5;
-            LVDTmag = LVDTmag - nanmean(LVDTmag(d.atime<0.1));
-            platonset = d.atime(findchangepts(LVDTmag,'Statistic','rms'));%d.atime(find(LVDTmag>6*nanstd(LVDTmag(d.atime<0.1)),1,'first'));
+            % if this didn't work, calculate from LVDT
+            if isnan(platonset)
+                LVDTmag = (d.LVDT(:,1).^2+d.LVDT(:,2).^2).^0.5;
+                LVDTmag = LVDTmag - nanmean(LVDTmag(d.atime<0.1));
+                platonset = d.atime(findchangepts(LVDTmag,'Statistic','rms'));%d.atime(find(LVDTmag>6*nanstd(LVDTmag(d.atime<0.1)),1,'first'));
+            end
         end
         
         % calculate perturbation parameters and unpack table into workspace
@@ -120,8 +107,14 @@ save(saveFileName,'dataTable');
             pertdir_calc_round_deg = pertparams.pertdir_calc_round_deg;
             pertdir_calc_deg = pertparams.pertdir_calc_deg;
         end
+        
         % Condition identifier - used for grouping when averaging the data -- should reflect your independent variable
-        condition = pertdir_calc_round_deg; 
+        if isempty(datasheet)
+            condition = NaN; 
+        else
+            condition = datasheet; %need to change datasheet to be a single column vec !!!!
+        end
+        
         % time variables
         AnalogFrameRate = d.AnalogFrameRate;
         VideoFrameRate = d.VideoFrameRate;
@@ -152,7 +145,7 @@ save(saveFileName,'dataTable');
         minterp = @(in) interp1(mtime,in(:),mnewtime);
         
         
-        % EMG
+        % EMG -- NEED TO THINK ABOUT HOW TO MAKE THIS MORE GENERALIZED
         EMG_MGAS_R = ainterp(d.EMG(:,contains(strtrim(string(d.EMGID)),["EMG_MGAS-R" "Voltage.MG-R" "EMG_MG-R" "EMG_MG_R"])));
         EMG_SOL_R = ainterp(d.EMG(:,contains(strtrim(string(d.EMGID)),["EMG_SOL-R" "Voltage.SOL-R" "EMG_SOL_R"])));
         EMG_TA_R = ainterp(d.EMG(:,contains(strtrim(string(d.EMGID)),["EMG_TA-R" "Voltage.TA-R" "EMG_TA_R"])));
@@ -185,7 +178,7 @@ save(saveFileName,'dataTable');
             EMG_VMED_L_raw = ainterp(d.rawData.analog.emg(:,contains(strtrim(string(d.EMGID)),["EMG_VMED-L" "Voltage.VMED-L" "EMG_VMED_L"])));
             EMG_RF_L_raw = ainterp(d.rawData.analog.emg(:,contains(strtrim(string(d.EMGID)),["EMG_RF-L" "Voltage.RF-L" "EMG_RF_L"])));
         catch
-            disp(f+": raw EMG data not found")
+            disp(extractAfter(f,srcFolder + "\")+": raw EMG data not found")
         end
         
         % ground reaction forces
@@ -220,7 +213,7 @@ save(saveFileName,'dataTable');
                 Right_Mz = ainterp(d.GRF(:,plateforcesID=="RT Mz"));
             catch
                 [Left_Fx,Left_Fy,Left_Fz,Left_Mx,Left_My,Left_Mz,Right_Fx,Right_Fy,Right_Fz,Right_Mx,Right_My,Right_Mz] = deal(nan(size(newtime)));
-                disp(f+": force data not found")
+                disp(extractAfter(f,srcFolder + "\")+": force data not found")
             end
         end
         
@@ -232,8 +225,9 @@ save(saveFileName,'dataTable');
         Accels_X = ainterp(d.Accels(:,1));
         Accels_Y = ainterp(d.Accels(:,2));
         
-        % interpolate CoM variables; in some cases the estimates of position and velocity from markers are
-        % unavailable. if so use estimates from forces.
+        % interpolate CoM variables; in some cases the estimates of 
+        % position and velocity from markers are unavailable. 
+        % if so use estimates from forces.
         COMAccel_X = ainterp(d.COMAccel(:,1));
         COMAccel_Y = ainterp(d.COMAccel(:,2));
         
@@ -249,35 +243,8 @@ save(saveFileName,'dataTable');
         COMVelo_X = ainterp(maresamp(d.COMVelo(:,1)));
         COMVelo_Y = ainterp(maresamp(d.COMVelo(:,2)));
         
-        % joint kinematics 1000
-        %         Hip_m_R = ainterp(maresamp(d.ID.data(:,contains(d.ID.colheaders,'hip_flexion_r_moment'))));
-        %         Hip_m_L = ainterp(maresamp(d.ID.data(:,contains(d.ID.colheaders,'hip_flexion_l_moment'))));
-        %
-        %         Knee_m_R = ainterp(maresamp(d.ID.data(:,contains(d.ID.colheaders,'knee_angle_r_moment'))));
-        %         Knee_m_L = ainterp(maresamp(d.ID.data(:,contains(d.ID.colheaders,'knee_angle_l_moment'))));
-        %
-        %         Ankle_m_R = ainterp(maresamp(d.ID.data(:,contains(d.ID.colheaders,'ankle_angle_r_moment'))));
-        %         Ankle_m_L = ainterp(maresamp(d.ID.data(:,contains(d.ID.colheaders,'ankle_angle_l_moment'))));
-        %
-        %         Hip_a_R = ainterp(maresamp(d.Markers(:,contains(string(d.MarkerID),'RHipAngles'),1)));
-        %         Hip_a_L = ainterp(maresamp(d.Markers(:,contains(string(d.MarkerID),'LHipAngles'),1)));
-        %
-        %         Knee_a_R = ainterp(maresamp(d.Markers(:,contains(string(d.MarkerID),'RKneeAngles'),1)));
-        %         Knee_a_L = ainterp(maresamp(d.Markers(:,contains(string(d.MarkerID),'LKneeAngles'),1)));
-        %
-        %         Ankle_a_R = ainterp(maresamp(d.Markers(:,contains(string(d.MarkerID),'RAnkleAngles'),1)));
-        %         Ankle_a_L = ainterp(maresamp(d.Markers(:,contains(string(d.MarkerID),'LAnkleAngles'),1)));
-        %
-        %         Hip_a2_R = ainterp(maresamp(d.IK.data(:,contains(d.IK.colheaders,'hip_flexion_r'))));
-        %         Hip_a2_L = ainterp(maresamp(d.IK.data(:,contains(d.IK.colheaders,'hip_flexion_l'))));
-        %
-        %         Knee_a2_R = ainterp(maresamp(d.IK.data(:,contains(d.IK.colheaders,'knee_angle_r'))));
-        %         Knee_a2_L = ainterp(maresamp(d.IK.data(:,contains(d.IK.colheaders,'knee_angle_l'))));
-        %
-        %         Ankle_a2_R = ainterp(maresamp(d.IK.data(:,contains(d.IK.colheaders,'ankle_angle_r'))));
-        %         Ankle_a2_L = ainterp(maresamp(d.IK.data(:,contains(d.IK.colheaders,'ankle_angle_l'))));
         
-        % joint kinematics and moments 100
+        % joint kinematics and moments (100Hz)
         try
             Hip_m_R = minterp(d.ID.data(:,contains(d.ID.colheaders,'hip_flexion_r_moment')));
             Hip_m_L = minterp(d.ID.data(:,contains(d.ID.colheaders,'hip_flexion_l_moment')));
@@ -358,10 +325,10 @@ save(saveFileName,'dataTable');
             try
                 COMPosminusLVDT_X = ainterp(d.data.calculated.com.plate.relative.pos(:,1));
                 COMPosminusLVDT_Y = ainterp(d.data.calculated.com.plate.relative.pos(:,2));
-                disp(f+": CoM position wrt ankle estimated from force data")
+                disp(extractAfter(f,srcFolder + "\")+": CoM position wrt ankle estimated from force data")
             catch
                 [COMPosminusLVDT_X,COMPosminusLVDT_Y] = deal(nan(size(newtime)));
-                disp(f+": CoM position wrt ankle not found")
+                disp(extractAfter(f,srcFolder + "\")+": CoM position wrt ankle not found")
             end
         end
         
@@ -369,10 +336,10 @@ save(saveFileName,'dataTable');
             try
                 COMVelo_X = ainterp(d.data.calculated.com.plate.relative.vel(:,1));
                 COMVelo_Y = ainterp(d.data.calculated.com.plate.relative.vel(:,2));
-                disp(f+": CoM velocity estimated from force data")
+                disp(extractAfter(f,srcFolder + "\")+": CoM velocity estimated from force data")
             catch
                 [COMVelo_X,COMVelo_Y] = deal(nan(size(newtime)));
-                disp(f+": CoM velocity not found")
+                disp(extractAfter(f,srcFolder + "\")+": CoM velocity not found")
             end
         end
         
